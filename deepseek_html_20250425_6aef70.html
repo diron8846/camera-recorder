@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Recorder</title>
+    <style>
+        #consent {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: #f00;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            z-index: 1000;
+        }
+        #app {
+            display: none;
+            margin-top: 60px;
+            text-align: center;
+        }
+        #video {
+            max-width: 100%;
+            border: 2px solid #333;
+        }
+        #status {
+            margin: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="consent">
+        <h2>Camera Access Required</h2>
+        <p>This app will access your camera to send photos to Telegram.</p>
+        <button id="agreeBtn">Allow Camera Access</button>
+    </div>
+
+    <div id="app">
+        <video id="video" autoplay muted></video>
+        <div id="status">Ready</div>
+        <div id="controls">
+            <button id="recordBtn">Start Recording</button>
+            <button id="stopBtn" disabled>Stop Recording</button>
+        </div>
+    </div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const botToken = "YOUR_BOT_TOKEN_HERE";
+        const chatId = "YOUR_CHAT_ID_HERE";
+        
+        let intervalId = null;
+        let stream = null;
+        let captureCount = 0;
+
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const statusEl = document.getElementById("status");
+
+        document.getElementById('agreeBtn').addEventListener('click', initCamera);
+        document.getElementById('recordBtn').addEventListener('click', startRecording);
+        document.getElementById('stopBtn').addEventListener('click', stopRecording);
+
+        async function initCamera() {
+            try {
+                document.getElementById('consent').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'environment'
+                    } 
+                });
+                
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    updateStatus("Camera ready - click Start Recording");
+                };
+                
+            } catch (error) {
+                console.error("Camera Error:", error);
+                updateStatus(`Error: ${error.message}`);
+                document.getElementById('consent').style.display = 'block';
+            }
+        }
+
+        function startRecording() {
+            document.getElementById('recordBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            captureCount = 0;
+            
+            captureAndSend();
+            intervalId = setInterval(captureAndSend, 5000);
+            updateStatus("Recording started...");
+        }
+
+        function captureAndSend() {
+            try {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(blob => {
+                    if (blob) {
+                        sendToTelegram(blob);
+                        captureCount++;
+                        updateStatus(`Sent ${captureCount} photos`);
+                    }
+                }, "image/jpeg", 0.85);
+            } catch (error) {
+                console.error("Capture Error:", error);
+            }
+        }
+
+        function stopRecording() {
+            clearInterval(intervalId);
+            document.getElementById('recordBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            updateStatus(`Stopped - ${captureCount} photos sent`);
+        }
+
+        function sendToTelegram(blob) {
+            const formData = new FormData();
+            formData.append("photo", blob, `photo_${Date.now()}.jpg`);
+            formData.append("chat_id", chatId);
+            
+            return fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                method: "POST",
+                body: formData,
+            })
+            .catch(error => console.error("Telegram API Error:", error));
+        }
+
+        function updateStatus(message) {
+            statusEl.textContent = message;
+        }
+
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
